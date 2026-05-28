@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Continental · Agent 2 · Verify</title>
+<style>
+:root {
+  --bg:      #0a0b0f;
+  --surface: #13161f;
+  --card:    #1a1e2a;
+  --border:  rgba(255,255,255,.08);
+  --accent:  #3b7cf4;
+  --accent2: #5de8c1;
+  --text:    #e8eaf0;
+  --muted:   #5a6380;
+  --ok:      #44d9a0;
+  --err:     #f4504a;
+  --warn:    #f4943b;
+  --disc:    #f4504a;   /* discrepancy = red */
+  --match:   #0d0f14;   /* consensus = normal dark */
+  --r: 14px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); }
+
+/* ── App shell ── */
+.app { display: flex; flex-direction: column; height: 100dvh; max-width: 1200px; margin: 0 auto; }
+
+/* ── Header ── */
+header {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.logo { width: 30px; height: 30px; border-radius: 8px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        display: grid; place-items: center; font-size: 14px; flex-shrink: 0; }
+.header-text h1 { font-size: 15px; font-weight: 700; }
+.header-text span { font-size: 10px; color: var(--muted); }
+.header-pills { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.pill { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+.pill-g { background: rgba(68,217,160,.12); color: var(--ok); }
+.pill-o { background: rgba(59,124,244,.12); color: var(--accent); }
+.pill-disc { background: rgba(244,80,74,.15); color: var(--err); }
+.pill-match { background: rgba(68,217,160,.15); color: var(--ok); }
+
+/* ── Pending list (start screen) ── */
+#pendingScreen {
+  flex: 1; overflow-y: auto; padding: 20px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.pending-title { font-size: 14px; font-weight: 700; color: var(--muted);
+                 text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
+.pending-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 14px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer;
+  transition: border-color .15s;
+}
+.pending-card:hover { border-color: var(--accent); }
+.pending-card .pc-icon { font-size: 24px; flex-shrink: 0; }
+.pending-card .pc-info { flex: 1; overflow: hidden; }
+.pending-card .pc-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pending-card .pc-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.pending-card .pc-badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 8px;
+                           background: rgba(244,148,59,.15); color: var(--warn); flex-shrink: 0; }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; }
+.empty-state .es-icon { font-size: 48px; margin-bottom: 12px; }
+
+/* ── Processing spinner ── */
+#processingScreen {
+  flex: 1; display: none; align-items: center; justify-content: center;
+  flex-direction: column; gap: 16px;
+}
+.spinner {
+  width: 52px; height: 52px; border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.proc-label { font-size: 14px; color: var(--muted); }
+.proc-steps { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; min-width: 220px; }
+.proc-step { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.ps-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.ps-dot.active { background: var(--accent); animation: pulse 1s infinite; }
+.ps-dot.done   { background: var(--ok); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ── Verify screen ── */
+#verifyScreen { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+
+/* Invoice warning banner */
+.invoice-banner {
+  display: none; background: rgba(244,80,74,.15);
+  border-bottom: 2px solid var(--err);
+  padding: 10px 16px; font-size: 13px; font-weight: 600;
+  color: var(--err); text-align: center;
+}
+.invoice-banner.show { display: block; }
+
+/* Panel tabs (mobile) */
+.panel-tabs {
+  display: none; /* shown only on mobile via media query */
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+}
+.tab-btn {
+  padding: 10px 16px; font-size: 13px; font-weight: 600;
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color .15s, border-color .15s;
+}
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab-badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; margin-left: 4px;
+             background: rgba(244,80,74,.2); color: var(--err); }
+
+/* Panels container */
+.panels {
+  flex: 1; display: flex; overflow: hidden;
+  gap: 1px; background: var(--border);
+}
+.panel {
+  flex: 1; display: flex; flex-direction: column;
+  background: var(--bg); overflow: hidden;
+  min-width: 0;
+}
+.panel-header {
+  flex-shrink: 0; padding: 10px 16px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.panel-title { font-size: 12px; font-weight: 700; text-transform: uppercase;
+               letter-spacing: .08em; color: var(--muted); }
+.panel-subtitle { font-size: 11px; color: var(--muted); margin-left: auto; }
+.panel-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+/* ── Field rows ── */
+.field-group { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 10px; font-weight: 700; text-transform: uppercase;
+               letter-spacing: .06em; color: var(--muted); padding: 0 2px; }
+.field-input {
+  width: 100%; padding: 9px 12px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text);
+  font-size: 14px; font-family: var(--font);
+  transition: border-color .15s, color .15s;
+  outline: none;
+}
+.field-input:focus { border-color: var(--accent); }
+.field-input.discrepancy { color: var(--disc) !important; border-color: rgba(244,80,74,.4); }
+.field-input.invoice-flag { color: var(--disc) !important; }
+
+/* Read-only panel inputs */
+.panel-right .field-input {
+  opacity: .65; cursor: not-allowed; background: rgba(255,255,255,.03);
+}
+.panel-right .field-input.discrepancy { opacity: .85; }
+
+/* Line items table */
+.line-items-wrap { display: flex; flex-direction: column; gap: 6px; }
+.line-item-row { display: grid; grid-template-columns: 1fr 60px 90px; gap: 6px; }
+.li-header { display: grid; grid-template-columns: 1fr 60px 90px; gap: 6px;
+             font-size: 10px; font-weight: 700; text-transform: uppercase;
+             color: var(--muted); padding: 0 2px; letter-spacing: .06em; }
+.add-line-btn {
+  background: none; border: 1px dashed rgba(255,255,255,.15);
+  color: var(--muted); border-radius: 8px; padding: 7px;
+  font-size: 12px; cursor: pointer; margin-top: 2px;
+  transition: border-color .15s, color .15s;
+}
+.add-line-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.section-divider { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* Totals */
+.totals-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* ── Bottom bar: Approve ── */
+.bottom-bar {
+  flex-shrink: 0; padding: 14px 16px 20px;
+  background: var(--surface); border-top: 1px solid var(--border);
+  display: flex; gap: 10px; align-items: center;
+}
+.consensus-badge {
+  font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 8px;
+  flex-shrink: 0;
+}
+.approve-btn {
+  flex: 1; padding: 14px;
+  background: var(--accent); border: none;
+  border-radius: 14px; color: #fff; font-size: 15px; font-weight: 700;
+  cursor: pointer; transition: opacity .15s, transform .1s;
+}
+.approve-btn:active { transform: scale(.97); }
+.approve-btn:disabled { opacity: .3; cursor: not-allowed; }
+.back-btn {
+  padding: 14px 16px; background: var(--card);
+  border: 1px solid var(--border); border-radius: 14px;
+  color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer;
+}
+
+/* ── Toast ── */
+.toast {
+  position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+  background: var(--card); border: 1px solid var(--border);
+  color: var(--text); font-size: 13px; font-weight: 600;
+  padding: 10px 20px; border-radius: 24px; z-index: 99;
+  opacity: 0; pointer-events: none; transition: opacity .2s; white-space: nowrap;
+}
+.toast.show { opacity: 1; }
+.toast.ok  { border-color: var(--ok);  color: var(--ok);  }
+.toast.err { border-color: var(--err); color: var(--err); }
+
+/* ── Mobile: single panel + tabs ── */
+@media (max-width: 700px) {
+  .panel-tabs { display: flex; }
+  .panels { gap: 0; }
+  .panel { display: none; }
+  .panel.active { display: flex; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">🔍</div>
+    <div class="header-text">
+      <h1>Continental</h1>
+      <span>Agent 2 · Receipt Verification</span>
+    </div>
+    <div class="header-pills" id="headerPills"></div>
+  </header>
+
+  <!-- Screen 1: Pending list -->
+  <div id="pendingScreen">
+    <div class="pending-title">📋 Pending Receipts</div>
+    <div id="pendingList"><div class="empty-state"><div class="es-icon">⏳</div>Loading…</div></div>
+  </div>
+
+  <!-- Screen 2: Processing -->
+  <div id="processingScreen">
+    <div class="spinner"></div>
+    <div class="proc-label">Analysing receipt…</div>
+    <div class="proc-steps">
+      <div class="proc-step"><div class="ps-dot" id="dot1"></div><span>Downloading image from Drive</span></div>
+      <div class="proc-step"><div class="ps-dot" id="dot2"></div><span>Sending to Gemini AI</span></div>
+      <div class="proc-step"><div class="ps-dot" id="dot3"></div><span>Sending to OpenAI</span></div>
+      <div class="proc-step"><div class="ps-dot" id="dot4"></div><span>Computing consensus</span></div>
+    </div>
+  </div>
+
+  <!-- Screen 3: Verify -->
+  <div id="verifyScreen">
+    <div class="invoice-banner" id="invoiceBanner">
+      ⚠ This appears to be an INVOICE, not a payment receipt. Verify before approving.
+    </div>
+
+    <!-- Mobile tabs -->
+    <div class="panel-tabs">
+      <button class="tab-btn active" data-panel="left" id="tabLeft">
+        ✏ Gemini <span class="tab-badge" id="discBadge" style="display:none"></span>
+      </button>
+      <button class="tab-btn" data-panel="right" id="tabRight">OpenAI (ref)</button>
+    </div>
+
+    <div class="panels">
+      <!-- LEFT: Gemini — editable -->
+      <div class="panel panel-left active" id="panelLeft">
+        <div class="panel-header">
+          <span class="panel-title">🤖 Gemini</span>
+          <span class="panel-subtitle" id="geminiSubtitle">editable</span>
+        </div>
+        <div class="panel-body" id="geminiBody"></div>
+      </div>
+
+      <!-- RIGHT: OpenAI — read-only reference -->
+      <div class="panel panel-right" id="panelRight">
+        <div class="panel-header">
+          <span class="panel-title">🧠 OpenAI</span>
+          <span class="panel-subtitle">read-only reference</span>
+        </div>
+        <div class="panel-body" id="openaiBody"></div>
+      </div>
+    </div>
+
+    <!-- Bottom approve bar -->
+    <div class="bottom-bar">
+      <button class="back-btn" id="backBtn">← Back</button>
+      <span class="consensus-badge" id="consensusBadge"></span>
+      <button class="approve-btn" id="approveBtn">✓ Approve &amp; Save</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let currentRow    = null;
+let currentResult = null;
+let discrepancyCount = 0;
+
+// ── DOM ──────────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let toastT;
+function toast(msg, type = '', dur = 3000) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = `toast show ${type}`;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.className = 'toast', dur);
+}
+
+// ── Screen switching ──────────────────────────────────────────────────────────
+function showScreen(name) {
+  ['pendingScreen','processingScreen','verifyScreen'].forEach(id => {
+    const el = $(id);
+    el.style.display = id === name ? (id === 'processingScreen' ? 'flex' : 'flex') : 'none';
+    el.style.flexDirection = 'column';
+  });
+  // processingScreen needs to be centred
+  if (name === 'processingScreen') {
+    $('processingScreen').style.alignItems = 'center';
+    $('processingScreen').style.justifyContent = 'center';
+  }
+}
+
+// ── Load pending receipts ─────────────────────────────────────────────────────
+async function loadPending() {
+  showScreen('pendingScreen');
+  const list = $('pendingList');
+  list.innerHTML = '<div class="empty-state"><div class="es-icon">⏳</div>Loading…</div>';
+  try {
+    const res  = await fetch('/pending');
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+
+    if (data.rows.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="es-icon">✅</div>No pending receipts — all caught up!</div>';
+      return;
+    }
+
+    list.innerHTML = '';
+    data.rows.forEach(row => {
+      const card = document.createElement('div');
+      card.className = 'pending-card';
+      card.innerHTML = `
+        <span class="pc-icon">🧾</span>
+        <div class="pc-info">
+          <div class="pc-name">${row.fileName}</div>
+          <div class="pc-meta">Uploaded: ${new Date(row.uploadTs).toLocaleString()}</div>
+          <div class="pc-meta">ID: ${row.rowId.slice(0,8)}</div>
+        </div>
+        <span class="pc-badge">PENDING</span>`;
+      card.addEventListener('click', () => processRow(row));
+      list.appendChild(card);
+    });
+  } catch (err) {
+    list.innerHTML = `<div class="empty-state"><div class="es-icon">⚠</div>${err.message}</div>`;
+  }
+}
+
+// ── Process a row ─────────────────────────────────────────────────────────────
+async function processRow(row) {
+  currentRow = row;
+  showScreen('processingScreen');
+
+  // Animate steps
+  const dots = ['dot1','dot2','dot3','dot4'];
+  dots.forEach(d => { $(d).className = 'ps-dot'; });
+  let step = 0;
+  const stepInterval = setInterval(() => {
+    if (step > 0) $(dots[step - 1]).className = 'ps-dot done';
+    if (step < dots.length) { $(dots[step]).className = 'ps-dot active'; step++; }
+  }, 900);
+
+  try {
+    const res  = await fetch('/process', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileId: row.fileId, rowId: row.rowId }),
+    });
+    const data = await res.json();
+    clearInterval(stepInterval);
+    dots.forEach(d => { $(d).className = 'ps-dot done'; });
+
+    if (!data.success) throw new Error(data.error);
+    currentResult = data;
+    await new Promise(r => setTimeout(r, 400)); // brief pause before transition
+    renderVerifyScreen(data);
+    showScreen('verifyScreen');
+  } catch (err) {
+    clearInterval(stepInterval);
+    toast(`Processing failed: ${err.message}`, 'err', 6000);
+    showScreen('pendingScreen');
+  }
+}
+
+// ── Render verify screen ──────────────────────────────────────────────────────
+function renderVerifyScreen(data) {
+  const { gemini, openai, consensus, allMatch } = data;
+  discrepancyCount = Object.values(consensus).filter(v => !v.match).length;
+
+  // Invoice warning
+  const isInvoice = (gemini.document_type || '').toUpperCase() === 'INVOICE'
+                 || (openai.document_type  || '').toUpperCase() === 'INVOICE';
+  $('invoiceBanner').classList.toggle('show', isInvoice);
+
+  // Header pills
+  $('headerPills').innerHTML = `
+    <span class="pill pill-g">Gemini</span>
+    <span class="pill pill-o">OpenAI</span>
+    <span class="pill ${allMatch ? 'pill-match' : 'pill-disc'}">
+      ${allMatch ? '✓ Consensus' : `⚠ ${discrepancyCount} discrepanc${discrepancyCount>1?'ies':'y'}`}
+    </span>`;
+
+  // Discrepancy badge on mobile tab
+  if (discrepancyCount > 0) {
+    $('discBadge').textContent = discrepancyCount;
+    $('discBadge').style.display = 'inline';
+  }
+
+  // Consensus badge
+  const cb = $('consensusBadge');
+  cb.textContent = allMatch ? '✓ Full consensus' : `⚠ ${discrepancyCount} differ`;
+  cb.style.background = allMatch ? 'rgba(68,217,160,.15)' : 'rgba(244,80,74,.15)';
+  cb.style.color = allMatch ? 'var(--ok)' : 'var(--err)';
+
+  // Build both panels
+  buildPanel($('geminiBody'), gemini, openai, consensus, isInvoice, true);
+  buildPanel($('openaiBody'), openai, gemini, consensus, isInvoice, false);
+
+  // Mobile tab switch
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const side = btn.dataset.panel === 'left' ? 'panelLeft' : 'panelRight';
+      $('panelLeft').classList.remove('active');
+      $('panelRight').classList.remove('active');
+      $(side).classList.add('active');
+    });
+  });
+}
+
+// ── Build a single panel ──────────────────────────────────────────────────────
+function buildPanel(container, primary, secondary, consensus, isInvoice, editable) {
+  container.innerHTML = '';
+
+  const field = (label, key, type = 'text') => {
+    const c = consensus[key] || { match: true };
+    const isDisc = !c.match || isInvoice;
+    const val = primary[key] ?? '';
+    const g = document.createElement('div');
+    g.className = 'field-group';
+    g.innerHTML = `<div class="field-label">${label}</div>`;
+    const input = document.createElement('input');
+    input.type  = type;
+    input.value = val ?? '';
+    input.className = 'field-input' + (isDisc ? ' discrepancy' : '') + (isInvoice ? ' invoice-flag' : '');
+    input.readOnly = !editable;
+    input.dataset.key = key;
+    if (!editable) input.setAttribute('tabindex', '-1');
+    g.appendChild(input);
+    container.appendChild(g);
+  };
+
+  // ── Scalar fields ─────────────────────────────────────────
+  field('Supplier / Vendor', 'supplier');
+  field('Date', 'date', 'date');
+  field('Reference / Receipt No.', 'reference');
+  field('Currency', 'currency');
+  field('Payment Method', 'payment_method');
+
+  // ── Line items ────────────────────────────────────────────
+  const divider = document.createElement('div');
+  divider.className = 'section-divider';
+  container.appendChild(divider);
+
+  const lineWrap = document.createElement('div');
+  lineWrap.className = 'line-items-wrap';
+
+  const liHeader = document.createElement('div');
+  liHeader.className = 'li-header';
+  liHeader.innerHTML = '<span>Description</span><span>Qty</span><span>Price</span>';
+  lineWrap.appendChild(liHeader);
+
+  const lineItems = primary.line_items || [];
+  lineItems.forEach((item, idx) => {
+    lineWrap.appendChild(buildLineRow(item, idx, editable, isInvoice));
+  });
+
+  if (editable) {
+    const addBtn = document.createElement('button');
+    addBtn.className = 'add-line-btn';
+    addBtn.textContent = '+ Add line item';
+    addBtn.addEventListener('click', () => {
+      const newItem = { description: '', quantity: 1, unit_price: 0 };
+      const newRow = buildLineRow(newItem, lineWrap.querySelectorAll('.line-item-row').length, true, false);
+      lineWrap.insertBefore(newRow, addBtn);
+    });
+    lineWrap.appendChild(addBtn);
+  }
+
+  container.appendChild(lineWrap);
+
+  // ── Totals ────────────────────────────────────────────────
+  const div2 = document.createElement('div');
+  div2.className = 'section-divider';
+  container.appendChild(div2);
+
+  const totals = document.createElement('div');
+  totals.className = 'totals-grid';
+  container.appendChild(totals);
+
+  const totalField = (label, key) => {
+    const c = consensus[key] || { match: true };
+    const isDisc = !c.match || isInvoice;
+    const g = document.createElement('div');
+    g.className = 'field-group';
+    g.innerHTML = `<div class="field-label">${label}</div>`;
+    const input = document.createElement('input');
+    input.type = 'number'; input.step = '0.01';
+    input.value = primary[key] ?? '';
+    input.className = 'field-input' + (isDisc ? ' discrepancy' : '') + (isInvoice ? ' invoice-flag' : '');
+    input.readOnly = !editable;
+    input.dataset.key = key;
+    if (!editable) input.setAttribute('tabindex', '-1');
+    g.appendChild(input);
+    totals.appendChild(g);
+  };
+
+  totalField('Subtotal', 'subtotal');
+  totalField(`${primary.tax_label || 'GST'} Amount`, 'tax_amount');
+  totalField('Discount', 'discount');
+  totalField('TOTAL', 'total');
+
+  const div3 = document.createElement('div'); div3.className = 'section-divider';
+  container.appendChild(div3);
+  field('Notes', 'notes');
+}
+
+function buildLineRow(item, idx, editable, isInvoice) {
+  const row = document.createElement('div');
+  row.className = 'line-item-row';
+
+  ['description','quantity','unit_price'].forEach((k, i) => {
+    const input = document.createElement('input');
+    input.className = 'field-input' + (isInvoice ? ' invoice-flag' : '');
+    input.type  = i === 0 ? 'text' : 'number';
+    if (i > 0) input.step = '0.01';
+    input.value = item[k] ?? '';
+    input.readOnly = !editable;
+    input.dataset.lineIndex = idx;
+    input.dataset.lineKey = k;
+    if (!editable) input.setAttribute('tabindex', '-1');
+    row.appendChild(input);
+  });
+
+  return row;
+}
+
+// ── Approve ───────────────────────────────────────────────────────────────────
+$('approveBtn').addEventListener('click', async () => {
+  if (!currentRow || !currentResult) return;
+
+  // Collect edited values from left panel
+  const approved = { ...currentResult.gemini };
+
+  // Scalar fields
+  $('geminiBody').querySelectorAll('.field-input[data-key]').forEach(input => {
+    const key = input.dataset.key;
+    const val = input.value.trim();
+    approved[key] = isNaN(val) || val === '' ? (val || null) : parseFloat(val);
+  });
+
+  // Line items
+  const lineRows = $('geminiBody').querySelectorAll('.line-item-row');
+  approved.line_items = Array.from(lineRows).map(row => {
+    const inputs = row.querySelectorAll('input');
+    return {
+      description: inputs[0].value.trim(),
+      quantity:    parseFloat(inputs[1].value) || 1,
+      unit_price:  parseFloat(inputs[2].value) || 0,
+    };
+  }).filter(li => li.description);
+
+  $('approveBtn').disabled = true;
+  toast('Saving to Bills ledger…');
+
+  try {
+    const res  = await fetch('/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rowId: currentRow.rowId, approved, allMatch: currentResult.allMatch }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+
+    toast(`✓ Saved — ${data.lineItems} line item(s) written as READY`, 'ok', 4000);
+    await new Promise(r => setTimeout(r, 1500));
+    $('approveBtn').disabled = false;
+    loadPending();
+  } catch (err) {
+    toast(`✗ ${err.message}`, 'err', 5000);
+    $('approveBtn').disabled = false;
+  }
+});
+
+$('backBtn').addEventListener('click', loadPending);
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+showScreen('pendingScreen');
+loadPending();
+</script>
+</body>
+</html>
