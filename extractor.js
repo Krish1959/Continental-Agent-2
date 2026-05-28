@@ -109,8 +109,23 @@ async function extractDual(base64, mimeType) {
   const start = Date.now();
   console.log('[Extractor] Starting dual extraction…');
   const [gemini, openai] = await Promise.all([
-    extractWithGemini(base64, mimeType).catch(e => ({ _error: `Gemini: ${e.message}` })),
-    extractWithOpenAI(base64, mimeType).catch(e => ({ _error: `OpenAI: ${e.message}` })),
+    extractWithGemini(base64, mimeType).catch(e => {
+      console.error('[Gemini API Error Debug]');
+      console.error('  Status Code :', e.status || e.statusCode || e.code || 'n/a');
+      console.error('  Message     :', e.message);
+      console.error('  Error type  :', e.constructor?.name);
+      if (e.details)       console.error('  Details     :', JSON.stringify(e.details, null, 2));
+      if (e.errorDetails)  console.error('  errorDetails:', JSON.stringify(e.errorDetails, null, 2));
+      if (e.response?.data) console.error('  Response    :', JSON.stringify(e.response.data, null, 2));
+      return { _error: `Gemini: ${e.message}`, _status: e.status || e.code };
+    }),
+    extractWithOpenAI(base64, mimeType).catch(e => {
+      console.error('[OpenAI API Error Debug]');
+      console.error('  Status Code :', e.status || e.statusCode || 'n/a');
+      console.error('  Message     :', e.message);
+      if (e.error) console.error('  Error body  :', JSON.stringify(e.error, null, 2));
+      return { _error: `OpenAI: ${e.message}`, _status: e.status };
+    }),
   ]);
   const { consensus, allMatch } = computeConsensus(gemini, openai);
   const durationMs = Date.now() - start;
