@@ -411,23 +411,7 @@ async function loadPending() {
   try {
     const res  = await fetch('/pending');
     const data = await res.json();
-    // Dump FULL raw response to debug panel
-    dbLog('=== /process response (HTTP ' + res.status + ') ===');
-    dbLog('success: ' + data.success + '  |  duration: ' + (data.durationMs||'?') + 'ms  |  consensus: ' + data.allMatch);
-    // Gemini status
-    if (data.gemini && data.gemini._error) {
-      dbLog('⛔ GEMINI FAILED: ' + data.gemini._error + ' [status=' + (data.gemini._status||'?') + ']');
-    } else if (data.gemini) {
-      dbLog('✓ Gemini: supplier=' + data.gemini.supplier + ' | total=' + data.gemini.total + ' | type=' + data.gemini.document_type);
-    }
-    // OpenAI status
-    if (data.openai && data.openai._error) {
-      dbLog('⛔ OPENAI FAILED: ' + data.openai._error + ' [status=' + (data.openai._status||'?') + ']');
-    } else if (data.openai) {
-      dbLog('✓ OpenAI: supplier=' + data.openai.supplier + ' | total=' + data.openai.total + ' | type=' + data.openai.document_type);
-    }
-    // Full raw dump
-    dbDump('FULL RAW RESPONSE', data);
+    dbLog('📋 /pending → ' + (data.count||0) + ' PENDING row(s) found');
     if (!data.success) throw new Error(data.error);
 
     if (data.rows.length === 0) {
@@ -478,6 +462,43 @@ async function processRow(row) {
     const data = await res.json();
     clearInterval(stepInterval);
     dots.forEach(d => { $(d).className = 'ps-dot done'; });
+
+    // ── Debug dump (remove when stable) ──────────────────────────────────────
+    dbLog('');
+    dbLog('=== POST /process → HTTP ' + res.status + ' ===');
+    dbLog('rowId   : ' + (data.rowId||'?'));
+    dbLog('fileId  : ' + (data.fileId||'?'));
+    dbLog('duration: ' + (data.durationMs||'?') + 'ms');
+    dbLog('consensus: ' + data.allMatch);
+    // Gemini
+    if (data.gemini && data.gemini._error) {
+      dbLog('⛔ GEMINI ERROR: ' + data.gemini._error + ' [status=' + (data.gemini._status||'?') + ']');
+    } else if (data.gemini) {
+      dbLog('✓ GEMINI ok:');
+      dbLog('   supplier : ' + data.gemini.supplier);
+      dbLog('   date     : ' + data.gemini.date);
+      dbLog('   total    : ' + data.gemini.total);
+      dbLog('   type     : ' + data.gemini.document_type);
+      dbLog('   items    : ' + (data.gemini.line_items||[]).length);
+    } else {
+      dbLog('⚠ GEMINI: no data in response');
+    }
+    // OpenAI
+    if (data.openai && data.openai._error) {
+      dbLog('⛔ OPENAI ERROR: ' + data.openai._error + ' [status=' + (data.openai._status||'?') + ']');
+    } else if (data.openai) {
+      dbLog('✓ OPENAI ok:');
+      dbLog('   supplier : ' + data.openai.supplier);
+      dbLog('   date     : ' + data.openai.date);
+      dbLog('   total    : ' + data.openai.total);
+      dbLog('   type     : ' + data.openai.document_type);
+      dbLog('   items    : ' + (data.openai.line_items||[]).length);
+    } else {
+      dbLog('⚠ OPENAI: no data in response');
+    }
+    dbLog('--- FULL JSON ---');
+    dbLog(JSON.stringify(data, null, 2));
+    // ─────────────────────────────────────────────────────────────────────────
 
     if (!data.success) throw new Error(data.error);
     currentResult = data;
