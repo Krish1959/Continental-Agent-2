@@ -113,3 +113,45 @@ app.listen(PORT, () => {
   console.log('└──────────────────────────────────────────────────────┘');
   console.log('');
 });
+
+// ── GET /test-gemini — simple handshake ───────────────────────────────────────
+// Sends "Hello" to Gemini and returns the raw response + timing.
+// Used to prove API key, network path, and credits without processing an image.
+app.get('/test-gemini', async (req, res) => {
+  const { GoogleGenAI } = require('@google/genai');
+  const start = Date.now();
+  const model = 'gemini-2.5-flash';
+  console.log(`[Gemini Handshake] Testing model: ${model}`);
+  try {
+    const ai       = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const response = await ai.models.generateContent({
+      model,
+      contents: [{ parts: [{ text: 'Hello. Reply with exactly: GEMINI_OK' }] }],
+    });
+    const text = response.text?.() || response.candidates?.[0]?.content?.parts?.[0]?.text || '(no text)';
+    const ms   = Date.now() - start;
+    console.log(`[Gemini Handshake] ✓ Response: "${text.trim()}" in ${ms}ms`);
+    res.json({ success: true, model, response: text.trim(), durationMs: ms });
+  } catch (err) {
+    const ms  = Date.now() - start;
+    const msg = err.message || String(err);
+    console.error(`[Gemini Handshake] ✗ ${msg}`);
+    // Parse inner JSON error if present
+    let parsed = null;
+    try { parsed = JSON.parse(msg); } catch (_) {}
+    res.json({
+      success: false, model,
+      error:   msg,
+      code:    parsed?.error?.code || err.status || 'unknown',
+      status:  parsed?.error?.status || 'unknown',
+      hint:    parsed?.error?.code === 429
+        ? 'Credits depleted — top up at https://aistudio.google.com/plan'
+        : parsed?.error?.code === 403
+        ? 'API key invalid or wrong project'
+        : parsed?.error?.code === 404
+        ? 'Model not found — check model name'
+        : 'Check Render logs for details',
+      durationMs: ms,
+    });
+  }
+});

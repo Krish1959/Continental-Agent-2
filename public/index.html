@@ -242,6 +242,25 @@ header {
   .panel.active { display: flex; }
 }
 
+/* ── Gemini test button ── */
+.gemini-test-bar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  background: rgba(68,217,160,.05);
+  border-top: 1px solid rgba(68,217,160,.15);
+}
+.gemini-test-btn {
+  font-size: 11px; font-weight: 700;
+  padding: 5px 14px; border-radius: 8px;
+  background: rgba(68,217,160,.15); border: 1px solid rgba(68,217,160,.3);
+  color: var(--ok); cursor: pointer; flex-shrink: 0;
+  transition: background .15s;
+}
+.gemini-test-btn:hover { background: rgba(68,217,160,.25); }
+.gemini-test-btn:disabled { opacity: .4; cursor: not-allowed; }
+.gemini-test-status { font-size: 11px; color: var(--muted); }
+
 /* ── DEBUG PANEL ── */
 .debug-panel {
   flex-shrink: 0;
@@ -350,6 +369,14 @@ header {
       <button class="back-btn" id="backBtn">← Back</button>
       <span class="consensus-badge" id="consensusBadge"></span>
       <button class="approve-btn" id="approveBtn">✓ Approve &amp; Save</button>
+    </div>
+
+    <!-- Gemini handshake test bar -->
+    <div class="gemini-test-bar" id="geminiTestBar">
+      <button class="gemini-test-btn" id="geminiTestBtn" onclick="runGeminiTest()">
+        🤖 Test Gemini
+      </button>
+      <span class="gemini-test-status" id="geminiTestStatus">Click to send "Hello" to Gemini API</span>
     </div>
 
     <!-- DEBUG PANEL — remove when stable -->
@@ -734,6 +761,44 @@ $('approveBtn').addEventListener('click', async () => {
 });
 
 $('backBtn').addEventListener('click', loadPending);
+
+// ── Gemini handshake test ────────────────────────────────────────────────────
+async function runGeminiTest() {
+  const btn    = $('geminiTestBtn');
+  const status = $('geminiTestStatus');
+  btn.disabled = true;
+  status.textContent = '⏳ Sending "Hello" to Gemini…';
+  status.style.color = 'var(--muted)';
+  dbLog('');
+  dbLog('=== GEMINI HANDSHAKE TEST ===');
+  dbLog('Sending: "Hello. Reply with exactly: GEMINI_OK"');
+  dbLog('Model  : gemini-2.5-flash');
+  try {
+    const res  = await fetch('/test-gemini');
+    const data = await res.json();
+    dbLog('Duration: ' + data.durationMs + 'ms');
+    if (data.success) {
+      dbLog('✓ GEMINI REACHABLE — Response: "' + data.response + '"');
+      status.textContent = '✓ Gemini OK — "' + data.response + '" (' + data.durationMs + 'ms)';
+      status.style.color = 'var(--ok)';
+    } else {
+      dbLog('⛔ GEMINI FAILED');
+      dbLog('   Code  : ' + data.code);
+      dbLog('   Status: ' + data.status);
+      dbLog('   Error : ' + data.error.slice(0, 200));
+      dbLog('   Hint  : ' + data.hint);
+      status.textContent = '⛔ ' + data.code + ' ' + data.status + ' — ' + data.hint;
+      status.style.color = 'var(--err)';
+    }
+    dbLog(JSON.stringify(data, null, 2));
+  } catch (err) {
+    dbLog('⛔ Fetch failed: ' + err.message);
+    status.textContent = '⛔ Network error: ' + err.message;
+    status.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 // ── Debug panel ────────────────────────────────────────────────────────────
 function dbLog(msg) {
