@@ -241,6 +241,37 @@ header {
   .panel { display: none; }
   .panel.active { display: flex; }
 }
+
+/* ── DEBUG PANEL ── */
+.debug-panel {
+  flex-shrink: 0;
+  background: #0a0c10;
+  border-top: 1px solid rgba(255,200,0,.2);
+  display: flex; flex-direction: column;
+  max-height: 220px; transition: max-height .3s;
+}
+.debug-panel.collapsed { max-height: 36px; overflow: hidden; }
+.debug-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 12px; flex-shrink: 0;
+  background: rgba(244,148,59,.08);
+  border-bottom: 1px solid rgba(255,200,0,.15);
+}
+.debug-header span { font-size: 11px; font-weight: 700; color: var(--warn); letter-spacing:.06em; }
+.debug-actions { display: flex; gap: 4px; }
+.debug-btn {
+  font-size: 10px; padding: 2px 8px; border-radius: 5px;
+  background: rgba(255,255,255,.07); border: none;
+  color: var(--muted); cursor: pointer;
+}
+.debug-btn:hover { background: rgba(255,255,255,.12); color: var(--text); }
+#debugBox {
+  flex: 1; width: 100%; resize: none;
+  background: transparent; border: none; outline: none;
+  color: #9fefa0; font-family: "Courier New", monospace;
+  font-size: 11px; line-height: 1.6;
+  padding: 8px 12px; overflow-y: auto;
+}
 </style>
 </head>
 <body>
@@ -320,6 +351,19 @@ header {
       <span class="consensus-badge" id="consensusBadge"></span>
       <button class="approve-btn" id="approveBtn">✓ Approve &amp; Save</button>
     </div>
+
+    <!-- DEBUG PANEL — remove when stable -->
+    <div class="debug-panel" id="debugPanel">
+      <div class="debug-header">
+        <span>🔧 Debug Log</span>
+        <div class="debug-actions">
+          <button class="debug-btn" id="copyDebugBtn">Copy</button>
+          <button class="debug-btn" id="clearDebugBtn">Clear</button>
+          <button class="debug-btn" id="toggleDebugBtn">▼</button>
+        </div>
+      </div>
+      <textarea id="debugBox" readonly placeholder="Debug output appears here after processing…"></textarea>
+    </div>
   </div>
 
 </div>
@@ -367,6 +411,14 @@ async function loadPending() {
   try {
     const res  = await fetch('/pending');
     const data = await res.json();
+    // Dump full server response to debug panel
+    dbLog('=== /process response ===');
+    dbLog(`success: ${data.success}  |  duration: ${data.durationMs}ms  |  consensus: ${data.allMatch}`);
+    if (data.gemini?._error)  dbLog('GEMINI ERROR: ' + data.gemini._error + ' (status: ' + (data.gemini._status||'?') + ')');
+    if (data.openai?._error)  dbLog('OPENAI ERROR: ' + data.openai._error);
+    if (data.gemini && !data.gemini._error) dbDump('Gemini result', data.gemini);
+    if (data.openai && !data.openai._error) dbDump('OpenAI result', data.openai);
+    dbDump('Consensus map', data.consensus);
     if (!data.success) throw new Error(data.error);
 
     if (data.rows.length === 0) {
@@ -639,6 +691,8 @@ $('approveBtn').addEventListener('click', async () => {
     const data = await res.json();
     if (!data.success) throw new Error(data.error);
 
+    dbLog('=== /approve response ===');
+    dbDump('Approve result', data);
     toast(`✓ Saved — ${data.lineItems} line item(s) written as READY`, 'ok', 4000);
     await new Promise(r => setTimeout(r, 1500));
     $('approveBtn').disabled = false;
@@ -650,6 +704,29 @@ $('approveBtn').addEventListener('click', async () => {
 });
 
 $('backBtn').addEventListener('click', loadPending);
+
+// ── Debug panel ────────────────────────────────────────────────────────────
+function dbLog(msg) {
+  const box = $('debugBox');
+  if (!box) return;
+  const ts = new Date().toTimeString().slice(0,8);
+  box.value += `[${ts}] ${msg}\n`;
+  box.scrollTop = box.scrollHeight;
+}
+function dbDump(label, obj) {
+  dbLog(`--- ${label} ---`);
+  dbLog(typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2));
+}
+$('toggleDebugBtn').addEventListener('click', () => {
+  const p = $('debugPanel');
+  const collapsed = p.classList.toggle('collapsed');
+  $('toggleDebugBtn').textContent = collapsed ? '▲' : '▼';
+});
+$('clearDebugBtn').addEventListener('click', () => { $('debugBox').value = ''; });
+$('copyDebugBtn').addEventListener('click', () => {
+  navigator.clipboard.writeText($('debugBox').value)
+    .then(() => toast('Debug log copied', '', 1500));
+});
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 showScreen('pendingScreen');
