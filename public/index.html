@@ -411,14 +411,23 @@ async function loadPending() {
   try {
     const res  = await fetch('/pending');
     const data = await res.json();
-    // Dump full server response to debug panel
-    dbLog('=== /process response ===');
-    dbLog(`success: ${data.success}  |  duration: ${data.durationMs}ms  |  consensus: ${data.allMatch}`);
-    if (data.gemini?._error)  dbLog('GEMINI ERROR: ' + data.gemini._error + ' (status: ' + (data.gemini._status||'?') + ')');
-    if (data.openai?._error)  dbLog('OPENAI ERROR: ' + data.openai._error);
-    if (data.gemini && !data.gemini._error) dbDump('Gemini result', data.gemini);
-    if (data.openai && !data.openai._error) dbDump('OpenAI result', data.openai);
-    dbDump('Consensus map', data.consensus);
+    // Dump FULL raw response to debug panel
+    dbLog('=== /process response (HTTP ' + res.status + ') ===');
+    dbLog('success: ' + data.success + '  |  duration: ' + (data.durationMs||'?') + 'ms  |  consensus: ' + data.allMatch);
+    // Gemini status
+    if (data.gemini && data.gemini._error) {
+      dbLog('⛔ GEMINI FAILED: ' + data.gemini._error + ' [status=' + (data.gemini._status||'?') + ']');
+    } else if (data.gemini) {
+      dbLog('✓ Gemini: supplier=' + data.gemini.supplier + ' | total=' + data.gemini.total + ' | type=' + data.gemini.document_type);
+    }
+    // OpenAI status
+    if (data.openai && data.openai._error) {
+      dbLog('⛔ OPENAI FAILED: ' + data.openai._error + ' [status=' + (data.openai._status||'?') + ']');
+    } else if (data.openai) {
+      dbLog('✓ OpenAI: supplier=' + data.openai.supplier + ' | total=' + data.openai.total + ' | type=' + data.openai.document_type);
+    }
+    // Full raw dump
+    dbDump('FULL RAW RESPONSE', data);
     if (!data.success) throw new Error(data.error);
 
     if (data.rows.length === 0) {

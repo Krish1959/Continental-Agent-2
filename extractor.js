@@ -1,12 +1,14 @@
-// extractor.js — Agent 2: Dual-LLM receipt/invoice extraction
+// extractor.js — Agent 2: Dual-LLM receipt extraction
+// Uses @google/genai (new SDK, supports gemini-2.5-flash)
+// Uses openai v4 for GPT-4o
 
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const OpenAI = require('openai').default || require('openai'); // v4 compat
+const { GoogleGenAI } = require('@google/genai');
+const OpenAI = require('openai').default || require('openai');
 
 const EXTRACTION_PROMPT = `
 You are a receipt/invoice data extraction engine for an accounting system.
 Analyze the image and extract ALL visible data.
-Respond ONLY with a valid JSON object — no explanation, no markdown fences, no extra text.
+Respond ONLY with a valid JSON object — no explanation, no markdown, no code fences.
 
 Return exactly this structure:
 {
@@ -29,27 +31,41 @@ Return exactly this structure:
 
 Rules:
 - Use null for any field not visible. Do NOT guess.
-- line_items must be an array, even for a single item.
+- line_items must be an array even for a single item.
 - All price fields must be numbers, not strings.
-- document_type must be "RECEIPT" (paid) or "INVOICE" (request for payment).
+- document_type: "RECEIPT" (paid) or "INVOICE" (request for payment).
 - Default currency to SGD if not visible.
 `.trim();
 
+// ── Gemini (new SDK: @google/genai) ──────────────────────────────────────────
 async function extractWithGemini(base64, mimeType) {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-  const result = await model.generateContent([
-    EXTRACTION_PROMPT,
-    { inlineData: { data: base64, mimeType } },
-  ]);
-  const text = result.response.text().trim();
-  console.log('[Gemini] Response length:', text.length);
+  const ai    = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const model = 'gemini-2.5-flash';
+
+  console.log(`[Gemini] Calling model: ${model}`);
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: [
+      {
+        parts: [
+          { text: EXTRACTION_PROMPT },
+          { inlineData: { mimeType, data: base64 } },
+        ],
+      },
+    ],
+  });
+
+  const text = response.text?.() || response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  console.log(`[Gemini] Response length: ${text.length}`);
+  console.log(`[Gemini] Raw (first 200): ${text.slice(0, 200)}`);
   return parseJSON(text, 'Gemini');
 }
 
+// ── OpenAI (GPT-4o) ───────────────────────────────────────────────────────────
 async function extractWithOpenAI(base64, mimeType) {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const res = await client.chat.completions.create({
+  const res    = await client.chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 1200,
     messages: [{
@@ -61,20 +77,23 @@ async function extractWithOpenAI(base64, mimeType) {
     }],
   });
   const text = res.choices[0].message.content.trim();
-  console.log('[OpenAI] Response length:', text.length);
+  console.log(`[OpenAI] Response length: ${text.length}`);
   return parseJSON(text, 'OpenAI');
 }
 
+// ── JSON parser ───────────────────────────────────────────────────────────────
 function parseJSON(text, source) {
   try {
     const clean = text.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
     return JSON.parse(clean);
   } catch (e) {
-    console.error(`[${source}] JSON parse failed:`, e.message, '| Raw:', text.slice(0, 120));
-    return { _parse_error: `${source}: ${e.message}` };
+    console.error(`[${source}] JSON parse failed: ${e.message}`);
+    console.error(`[${source}] Raw text: ${text.slice(0, 300)}`);
+    return { _parse_error: `${source}: ${e.message}`, _raw: text.slice(0, 300) };
   }
 }
 
+// ── Consensus ─────────────────────────────────────────────────────────────────
 function computeConsensus(gemini, openai) {
   const FIELDS = [
     'document_type','supplier','date','reference','currency',
@@ -87,7 +106,6 @@ function computeConsensus(gemini, openai) {
     const o = norm(openai[f]);
     consensus[f] = { match: g === o, gemini: gemini[f], openai: openai[f] };
   }
-  // Line items — compare count only (deep compare too fragile)
   const gl = (gemini.line_items || []).length;
   const ol = (openai.line_items  || []).length;
   consensus.line_items = {
@@ -105,31 +123,34 @@ function norm(val) {
   return String(val).trim().toLowerCase();
 }
 
+// ── Main ──────────────────────────────────────────────────────────────────────
 async function extractDual(base64, mimeType) {
   const start = Date.now();
   console.log('[Extractor] Starting dual extraction…');
+
   const [gemini, openai] = await Promise.all([
     extractWithGemini(base64, mimeType).catch(e => {
-      console.error('[Gemini API Error Debug]');
-      console.error('  Status Code :', e.status || e.statusCode || e.code || 'n/a');
-      console.error('  Message     :', e.message);
-      console.error('  Error type  :', e.constructor?.name);
-      if (e.details)       console.error('  Details     :', JSON.stringify(e.details, null, 2));
-      if (e.errorDetails)  console.error('  errorDetails:', JSON.stringify(e.errorDetails, null, 2));
-      if (e.response?.data) console.error('  Response    :', JSON.stringify(e.response.data, null, 2));
-      return { _error: `Gemini: ${e.message}`, _status: e.status || e.code };
+      console.error('[Gemini API Error]');
+      console.error('  Status :', e.status || e.statusCode || e.code || 'n/a');
+      console.error('  Message:', e.message);
+      if (e.details)        console.error('  Details:', JSON.stringify(e.details));
+      if (e.errorDetails)   console.error('  ErrorDetails:', JSON.stringify(e.errorDetails));
+      if (e.response?.data) console.error('  Response:', JSON.stringify(e.response.data));
+      return { _error: e.message, _status: String(e.status || e.code || 'unknown') };
     }),
     extractWithOpenAI(base64, mimeType).catch(e => {
-      console.error('[OpenAI API Error Debug]');
-      console.error('  Status Code :', e.status || e.statusCode || 'n/a');
-      console.error('  Message     :', e.message);
-      if (e.error) console.error('  Error body  :', JSON.stringify(e.error, null, 2));
-      return { _error: `OpenAI: ${e.message}`, _status: e.status };
+      console.error('[OpenAI API Error]');
+      console.error('  Status :', e.status || 'n/a');
+      console.error('  Message:', e.message);
+      if (e.error) console.error('  Body:', JSON.stringify(e.error));
+      return { _error: e.message, _status: String(e.status || 'unknown') };
     }),
   ]);
+
   const { consensus, allMatch } = computeConsensus(gemini, openai);
   const durationMs = Date.now() - start;
-  console.log(`[Extractor] Done in ${durationMs}ms — consensus: ${allMatch}`);
+  console.log(`[Extractor] Done in ${durationMs}ms — allMatch: ${allMatch}`);
+  console.log(`[Extractor] Gemini ok: ${!gemini._error} | OpenAI ok: ${!openai._error}`);
   return { gemini, openai, consensus, allMatch, durationMs };
 }
 
