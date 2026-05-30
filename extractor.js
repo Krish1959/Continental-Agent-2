@@ -1,10 +1,34 @@
 // extractor.js — Agent 2: Dual-LLM receipt extraction
 // SDK: @google/genai v2 (new) + openai v4
+// GST rules loaded at runtime from GST_RULES.txt
 
 const { GoogleGenAI } = require('@google/genai');
 const OpenAI = require('openai').default || require('openai');
+const fs   = require('fs');
+const path = require('path');
 
-const EXTRACTION_PROMPT = `
+// ── Load GST rules from file (runtime, editable without code changes) ─────────
+function loadGSTRules() {
+  const rulesPath = path.join(__dirname, 'GST_RULES.txt');
+  if (!fs.existsSync(rulesPath)) {
+    console.warn('[Extractor] GST_RULES.txt not found — using base prompt only');
+    return '';
+  }
+  const raw = fs.readFileSync(rulesPath, 'utf8');
+  // Strip comment lines (starting with #) and blank lines for cleaner prompt
+  const rules = raw
+    .split('\n')
+    .filter(line => !line.trimStart().startsWith('#') && line.trim() !== '')
+    .join('\n');
+  console.log(`[Extractor] GST_RULES.txt loaded — ${rules.length} chars`);
+  return rules;
+}
+
+// Load once at startup (cached for performance)
+const GST_RULES = loadGSTRules();
+
+// ── Base extraction prompt ────────────────────────────────────────────────────
+const BASE_PROMPT = `
 You are a receipt/invoice data extraction engine for an accounting system.
 Analyze the image and extract ALL visible data.
 Respond ONLY with a valid JSON object — no explanation, no markdown, no code fences.
@@ -36,63 +60,65 @@ Rules:
 - Default currency to SGD if not visible.
 `.trim();
 
-// ── Extract text from @google/genai response (defensive, logs structure) ──────
+// Full prompt = base + GST rules (injected as additional context)
+function buildPrompt() {
+  if (!GST_RULES) return BASE_PROMPT;
+  return BASE_PROMPT + '\n\n## SINGAPORE-SPECIFIC GST RULES — APPLY THESE STRICTLY:\n' + GST_RULES;
+}
+
+// ── Extract text from @google/genai response (defensive) ──────────────────────
 function extractGeminiText(response) {
-  // Log exact shape so we can see what the SDK returns
-  console.log('[Gemini] response type      :', typeof response);
   console.log('[Gemini] response keys      :', Object.keys(response || {}).join(', '));
   console.log('[Gemini] typeof .text       :', typeof response?.text);
-  console.log('[Gemini] typeof .candidates :', typeof response?.candidates);
 
-  // Try every known path in @google/genai v1 and v2
-  // Path 1: response.text as a string property (v2 getter)
+  // Path 1: string property (v2 getter — most common)
   if (typeof response?.text === 'string' && response.text.length > 0) {
-    console.log('[Gemini] Text via: response.text (string property)');
+    console.log('[Gemini] text via: response.text (string property)');
     return response.text;
   }
-  // Path 2: response.text() as a method (old SDK / some builds)
+  // Path 2: method (some builds)
   if (typeof response?.text === 'function') {
-    const t = response.text();
-    console.log('[Gemini] Text via: response.text() (method)');
-    return t;
+    console.log('[Gemini] text via: response.text() (method)');
+    return response.text();
   }
   // Path 3: candidates array
   const t3 = response?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (t3) {
-    console.log('[Gemini] Text via: candidates[0].content.parts[0].text');
+    console.log('[Gemini] text via: candidates[0].content.parts[0].text');
     return t3;
   }
-  // Path 4: response.response (some SDK versions wrap it)
+  // Path 4: nested response wrapper
   const t4 = response?.response?.text?.();
   if (t4) {
-    console.log('[Gemini] Text via: response.response.text()');
+    console.log('[Gemini] text via: response.response.text()');
     return t4;
   }
-  // Path 5: stringify and return raw for debugging
-  console.warn('[Gemini] No known text path found. Full response:',
+  console.warn('[Gemini] No text path matched. Full response:',
     JSON.stringify(response, null, 2).slice(0, 500));
   return '';
 }
 
-// ── Gemini ────────────────────────────────────────────────────────────────────
+// ── Gemini extraction ─────────────────────────────────────────────────────────
 async function extractWithGemini(base64, mimeType) {
   const ai    = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const model = 'gemini-2.5-flash';
   console.log(`[Gemini] Calling model: ${model}`);
 
+  const prompt = buildPrompt();
+
   const response = await ai.models.generateContent({
     model,
     contents: [{
       parts: [
-        { text: EXTRACTION_PROMPT },
+        { text: prompt },
         { inlineData: { mimeType, data: base64 } },
       ],
     }],
   });
 
   const text = extractGeminiText(response);
-  console.log(`[Gemini] Extracted text length: ${text.length}`);
-  if (text.length > 0) console.log(`[Gemini] First 200 chars: ${text.slice(0, 200)}`);
+  console.log(`[Gemini] Response length: ${text.length}`);
+  if (text.length > 0) console.log(`[Gemini] First 200: ${text.slice(0, 200)}`);
   return parseJSON(text, 'Gemini');
 }
 
@@ -100,28 +126,28 @@ async function extractWithGemini(base64, mimeType) {
 async function geminiHello() {
   const ai    = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const model = 'gemini-2.5-flash';
-  console.log(`[Gemini Hello] Sending handshake to ${model}…`);
-
+  console.log(`[Gemini Hello] Handshake to ${model}…`);
   const response = await ai.models.generateContent({
     model,
     contents: [{ parts: [{ text: 'Hello. Reply with exactly: GEMINI_OK' }] }],
   });
-
   const text = extractGeminiText(response);
   console.log(`[Gemini Hello] Response: "${text.trim()}"`);
   return text.trim();
 }
 
-// ── OpenAI ────────────────────────────────────────────────────────────────────
+// ── OpenAI extraction ─────────────────────────────────────────────────────────
 async function extractWithOpenAI(base64, mimeType) {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const res    = await client.chat.completions.create({
+  const prompt = buildPrompt();
+
+  const res = await client.chat.completions.create({
     model: 'gpt-4o',
-    max_tokens: 1200,
+    max_tokens: 1500,
     messages: [{
       role: 'user',
       content: [
-        { type: 'text',      text: EXTRACTION_PROMPT },
+        { type: 'text',      text: prompt },
         { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' } },
       ],
     }],
@@ -134,7 +160,7 @@ async function extractWithOpenAI(base64, mimeType) {
 // ── JSON parser ───────────────────────────────────────────────────────────────
 function parseJSON(text, source) {
   if (!text || text.length === 0) {
-    console.error(`[${source}] Empty response — cannot parse`);
+    console.error(`[${source}] Empty response`);
     return { _parse_error: `${source}: empty response from API` };
   }
   try {
@@ -185,10 +211,9 @@ async function extractDual(base64, mimeType) {
   const [gemini, openai] = await Promise.all([
     extractWithGemini(base64, mimeType).catch(e => {
       console.error('[Gemini API Error]');
-      console.error('  Status :', e.status || e.statusCode || e.code || 'n/a');
+      console.error('  Status :', e.status || e.code || 'n/a');
       console.error('  Message:', e.message);
       if (e.details)        console.error('  Details:', JSON.stringify(e.details));
-      if (e.errorDetails)   console.error('  ErrDets:', JSON.stringify(e.errorDetails));
       if (e.response?.data) console.error('  Body   :', JSON.stringify(e.response.data));
       return { _error: e.message, _status: String(e.status || e.code || 'unknown') };
     }),

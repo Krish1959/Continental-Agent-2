@@ -1,0 +1,86 @@
+# ============================================================
+# CONTINENTAL PROJECT — Singapore GST Extraction Rules
+# ============================================================
+# This file is loaded by Agent 2's extractor at runtime.
+# Edit this file to update GST rules without touching code.
+# Lines starting with # are comments and are ignored.
+# Last updated: May 2026 | GST Rate: 9%
+# ============================================================
+
+## CURRENT GST RATE
+GST is currently 9% in Singapore (effective 1 January 2024).
+If the receipt shows a different rate, use the rate shown on the receipt.
+
+## PRICE INTERPRETATION
+- Receipts in Singapore show GROSS prices (GST-inclusive) on line items.
+- The printed item price (e.g. 29.00) is the GROSS amount including GST.
+- NET amount = GROSS / 1.09  (round to 2 decimal places)
+- GST amount = GROSS - NET   (round to 2 decimal places)
+- Example: Item $29.00 gross → Net $26.61 → GST $2.39
+
+## TOTAL AND SUBTOTAL RULES
+- "subtotal" must reflect the NET amount (before GST) of all paid items.
+- "tax_amount" must reflect the total GST paid.
+- "total" must reflect the final GROSS amount actually paid (cash tendered).
+- subtotal + tax_amount = total  (verify this always holds true).
+- If the receipt explicitly prints a "Net Amount" or "Before GST" line,
+  use that value directly as subtotal.
+- If the receipt explicitly prints a "GST" line, use that value directly
+  as tax_amount.
+
+## DISCOUNTS
+- Discounts reduce the GROSS price before GST is calculated.
+- GST is NOT applicable on the discount amount itself.
+- If a discount is shown:
+    discounted_gross = original_price - discount_amount
+    net              = discounted_gross / 1.09
+    gst              = discounted_gross - net
+- Record "discount" as the face value of the discount shown on receipt.
+- Do NOT apply GST to the discount field.
+
+## FREE ITEMS
+- Any item marked as FREE, $0.00, or with a negative line
+  cancelling a previous line must NOT contribute to subtotal or total.
+- Still include free items in line_items with unit_price: 0.00
+  so the record is complete for audit purposes.
+
+## NEGATIVE LINE ITEMS (REVERSALS / VOIDS)
+- Some receipts show a negative amount (e.g. -29.00) to cancel
+  a previously charged item.
+- Include these in line_items with a negative unit_price.
+- Subtract their value from the subtotal accordingly.
+- Do NOT treat payment processor settlement lines (e.g. "ADYEN Visa -29.00")
+  as product line items — these are payment records, not purchases.
+
+## PAYMENT METHOD
+- Extract the specific card network if visible:
+  Visa, Mastercard, Amex, PayNow, GrabPay, NETS, Cash.
+- Do NOT return generic "Card" if the actual network is printed on receipt.
+- If card last 4 digits are printed, record them in the notes field.
+  Example notes: "Visa ending 7067"
+
+## SUPPLIER NAME
+- Use the store name printed at the top of the receipt.
+- Include the mall or location if printed.
+  Example: "BHG Tampines Mall" not just "BHG".
+
+## LINE ITEM DESCRIPTION
+- Include the SKU or item code if printed before the description.
+  Example: keep "1183536 S/BF BELT 29" — do NOT strip the leading number.
+- The leading number is a product SKU, not a quantity.
+
+## CURRENCY
+- Default to SGD for all Singapore receipts unless another
+  currency is explicitly printed on the receipt.
+
+## GST REGISTRATION NUMBER
+- If the receipt shows a GST Reg No (e.g. M2-0119092-4),
+  record it in the notes field.
+  Example notes: "GST Reg: M2-0119092-4 | Visa ending 7067"
+
+## WHAT TO IGNORE
+- Ignore loyalty point lines, member tier lines, and survey URLs.
+- Ignore ADYEN, Nets, or payment gateway settlement lines.
+- Ignore "Thank you" and promotional footer text.
+- Ignore staff ID, terminal ID, and register number lines
+  unless specifically needed for the reference field.
