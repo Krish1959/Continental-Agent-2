@@ -56,7 +56,9 @@ async function extractWithGemini(base64, mimeType) {
     ],
   });
 
-  const text = response.text?.() || response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const text = response.text
+    || response.candidates?.[0]?.content?.parts?.[0]?.text
+    || '';
   console.log(`[Gemini] Response length: ${text.length}`);
   console.log(`[Gemini] Raw (first 200): ${text.slice(0, 200)}`);
   return parseJSON(text, 'Gemini');
